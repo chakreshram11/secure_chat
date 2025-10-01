@@ -50,8 +50,8 @@ npm run build
 npm run preview
 ```
 
-⚙️ Configuration
-React Compiler (Optional)
+## ⚙️ Configuration
+# React Compiler (Optional)
 
 By default, the React Compiler is disabled.
 If you want to enable it, follow the React Compiler installation guide
@@ -62,7 +62,7 @@ ESLint
 To expand ESLint with type-aware rules, switch to the React + TypeScript template
  and configure typescript-eslint
 .
-
+```bash
 📂 Project Structure
 .
 ├── public/              # Static assets
@@ -75,17 +75,18 @@ To expand ESLint with type-aware rules, switch to the React + TypeScript templat
 ├── vite.config.js       # Vite config
 ├── package.json
 └── README.md
+```
 
-🤝 Contributing
+## 🤝 Contributing
 
 Contributions are welcome!
 Feel free to open issues and submit pull requests.
 
-📜 License
+## 📜 License
 
 This project is licensed under the MIT License.
 
-💡 Author
+## 💡 Author
 
 Made with ❤️ using React + Vite.
 
