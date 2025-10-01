@@ -22,9 +22,9 @@ Clone the repository and install dependencies:
 
 ```bash
 # Clone repo
-git clone https://github.com/<your-username>/<your-repo>.git
+https://github.com/chakreshram11/secure_chat.git
 
-cd <your-repo>
+cd frontend
 
 # Install dependencies
 npm install
