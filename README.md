@@ -28,22 +28,27 @@ cd frontend
 
 # Install dependencies
 npm install
+```
 
-🚀 Usage
+## 🚀 Usage
 
+```bash
 Run the development server:
 
 npm run dev
+```
 
+## Build for production:
 
-Build for production:
-
+```bash
 npm run build
+```
 
+## Preview production build:
 
-Preview production build:
-
+```bash
 npm run preview
+```
 
 ⚙️ Configuration
 React Compiler (Optional)
@@ -87,7 +92,7 @@ Made with ❤️ using React + Vite.
 
 ---
 
-👉 You just need to replace `https://github.com/<your-username>/<your-repo>.git` with your actual GitHub repo link.  
+👉 You just need to replace `https://github.com/chakreshram11/secure_chat.git` with your actual GitHub repo link.  
 
 Do you also want me to add **badges (npm, license, build, stars, etc.)** at the top for a more professional look?
 
