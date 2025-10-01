@@ -7,19 +7,20 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 export default function App() {
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  // ✅ Use sessionStorage → supports multiple users in different tabs
+  const [token, setToken] = useState(sessionStorage.getItem("token"));
 
   useEffect(() => {
     if (token) {
-      localStorage.setItem("token", token);
+      sessionStorage.setItem("token", token);
     } else {
-      localStorage.removeItem("token");
+      sessionStorage.removeItem("token");
     }
   }, [token]);
 
   return (
     <>
-      {/* ✅ Toast container for global notifications */}
+      {/* ✅ Global Toast Notifications */}
       <ToastContainer
         position="top-right"
         autoClose={3000}
@@ -28,9 +29,10 @@ export default function App() {
         closeOnClick
         pauseOnHover
         draggable
+        theme="colored"
       />
 
-      {/* ✅ Conditional rendering for auth */}
+      {/* ✅ Show Login if no token, else Chat */}
       {!token ? (
         <Login onLogin={(t) => setToken(t)} />
       ) : (
