@@ -18,17 +18,33 @@ export default function AdminPanel() {
   const [newGroup, setNewGroup] = useState({ name: "", members: [] });
   const [editingGroup, setEditingGroup] = useState(null);
 
-  /* ---------- SOCKET.IO ---------- */
-  useEffect(() => {
-    const socket = io(import.meta.env.VITE_API_BASE || "http://localhost:5000", {
-      auth: { token: localStorage.getItem("token") },
+/* ---------- SOCKET.IO ---------- */
+useEffect(() => {
+  const socket = io(import.meta.env.VITE_API_BASE || "http://localhost:5000", {
+    auth: { token: localStorage.getItem("token") },
+  });
+
+  // ✅ Listen for new users (from any admin or registration)
+  socket.on("user:new", (newUser) => {
+    console.log("👤 New user broadcast:", newUser);
+    setUsers((prev) => {
+      if (prev.some((u) => u._id === newUser._id)) return prev;
+      return [...prev, newUser];
     });
+  });
 
-    socket.on("userAdded", () => loadUsers());
-    socket.on("groupAdded", () => loadGroups());
+  // ✅ Listen for user deletions
+  socket.on("user:deleted", (deletedUser) => {
+    console.log("🗑️ User deleted broadcast:", deletedUser);
+    setUsers((prev) => prev.filter((u) => u._id !== deletedUser._id));
+  });
 
-    return () => socket.disconnect();
-  }, []);
+  // ✅ Listen for group updates (optional)
+  socket.on("groupAdded", () => loadGroups());
+
+  return () => socket.disconnect();
+}, []);
+
 
   /* ---------- LOAD DATA ---------- */
   async function loadUsers() {
@@ -56,32 +72,36 @@ export default function AdminPanel() {
 
   /* ---------- USER FUNCTIONS ---------- */
   async function addUser() {
-    if (!newUser.username || !newUser.password) {
-      return toast.warning("⚠️ Username & Password required");
-    }
-    setLoading(true);
-    try {
-      await api.post("/api/admin/users", newUser);
-      toast.success("✅ User added");
-      setNewUser({ username: "", password: "", displayName: "", role: "user" });
-      loadUsers();
-    } catch {
-      toast.error("❌ Failed to add user");
-    } finally {
-      setLoading(false);
-    }
+  if (!newUser.username || !newUser.password) {
+    return toast.warning("⚠️ Username & Password required");
   }
+  setLoading(true);
+  try {
+    const { data } = await api.post("/api/admin/users", newUser);
+    toast.success(`✅ User "${data.user.username}" added successfully`);
+    setNewUser({ username: "", password: "", displayName: "", role: "user" });
+    setUsers((prev) => [...prev, data.user]); // optional immediate local add
+  } catch (err) {
+    toast.error(err.response?.data?.error || "❌ Failed to add user");
+  } finally {
+    setLoading(false);
+  }
+}
 
-  async function deleteUser(id) {
-    if (!window.confirm("Delete this user?")) return;
-    try {
-      await api.delete(`/api/admin/users/${id}`);
-      toast.success("🗑️ User deleted");
-      loadUsers();
-    } catch {
-      toast.error("❌ Failed to delete user");
-    }
+
+async function deleteUser(id) {
+  if (!window.confirm("Delete this user?")) return;
+  try {
+    await api.delete(`/api/admin/users/${id}`);
+    toast.success("🗑️ User deleted");
+
+    // ✅ Immediately reflect deletion locally
+    setUsers((prev) => prev.filter((u) => u._id !== id));
+  } catch (err) {
+    toast.error("❌ Failed to delete user");
   }
+}
+
 
   async function toggleUserRole(id, currentRole) {
     try {

@@ -36,7 +36,9 @@ export default function App() {
       {!token ? (
         <Login onLogin={(t) => setToken(t)} />
       ) : (
+        <div className="h-screen flex flex-col">
         <Chat token={token} onLogout={() => setToken(null)} />
+        </div>
       )}
     </>
   );

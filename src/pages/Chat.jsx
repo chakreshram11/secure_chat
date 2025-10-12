@@ -5,6 +5,7 @@ import io from "socket.io-client";
 import ChatWindow from "../components/ChatWindow";
 import AdminPanel from "../pages/AdminPanel";
 import { Menu } from "lucide-react";
+import { toast } from "react-toastify";
 
 export default function Chat({ token, onLogout }) {
   const [users, setUsers] = useState([]);
@@ -15,42 +16,141 @@ export default function Chat({ token, onLogout }) {
 
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [lastSeen, setLastSeen] = useState({});
+  const [systemMessages, setSystemMessages] = useState([]); // ✅ For optional welcome messages
   const socketRef = useRef();
 
-  useEffect(() => {
-    setToken(token);
+ useEffect(() => {
+  setToken(token);
 
-    (async () => {
-      try {
-        // ✅ fetch logged-in user
-        const { data: me } = await api.get("/api/users/me");
-        setCurrentUser(me);
+  let mounted = true;
+  const currentUserRef = { current: null }; // will be updated below
 
-        // ✅ fetch all users
-        const { data: allUsers } = await api.get("/api/users");
-        setUsers(allUsers);
-      } catch (err) {
-        console.error("Failed to load users", err);
-      }
-    })();
+  async function init() {
+    try {
+      const { data: me } = await api.get("/api/users/me");
+      if (!mounted) return;
+      setCurrentUser(me);
+      currentUserRef.current = me;
 
-    // ✅ init socket
-    socketRef.current = io(import.meta.env.VITE_API_BASE || "http://localhost:5000", {
-      auth: { token },
+      const { data: allUsers } = await api.get("/api/users");
+      if (!mounted) return;
+      setUsers(allUsers);
+    } catch (err) {
+      console.error("Failed to load users", err);
+    }
+  }
+  init();
+
+  const socket = io(import.meta.env.VITE_API_BASE || "http://localhost:5000", {
+    auth: { token },
+  });
+  socketRef.current = socket;
+
+  // Handlers (named so cleanup works reliably)
+  const onUserNew = (newUser) => {
+    console.log("👤 New user joined:", newUser);
+    setUsers((prev) => {
+      if (prev.some((u) => u._id === newUser._id)) return prev;
+      return [...prev, newUser];
     });
+  };
 
-    socketRef.current.on("message", (m) => {
-      console.log("incoming message", m);
-    });
+  const onUserAdded = onUserNew; // support multiple event names
+  const onUserUpdated = (updated) => {
+    console.log("🔁 user updated:", updated);
+    setUsers((prev) => prev.map((u) => (u._id === updated._id ? { ...u, ...updated } : u)));
+    // If the updated user is the current user, refresh currentUser
+    if (currentUserRef.current && String(currentUserRef.current._id) === String(updated._id)) {
+      setCurrentUser((prev) => ({ ...prev, ...updated }));
+      currentUserRef.current = { ...currentUserRef.current, ...updated };
+    }
+  };
 
-    // ✅ handle online/offline updates
-    socketRef.current.on("onlineUsers", ({ online, lastSeen }) => {
-      setOnlineUsers(online);
-      setLastSeen(lastSeen);
-    });
+  const onUserDeleted = (deleted) => {
+    console.log("🗑️ User deleted:", deleted);
+    if (currentUserRef.current && String(currentUserRef.current._id) === String(deleted._id)) {
+      // If our own account was removed -> force logout
+      // Keep this simple and non-modal — you can change to toast/redirect
+      alert("⚠️ Your account has been removed by an admin.");
+      handleLogout();
+    } else {
+      setUsers((prev) => prev.filter((u) => u._id !== deleted._id));
+      // if currently selected user was deleted, clear selection
+      setSelectedUser((sel) => (sel && sel._id === deleted._id ? null : sel));
+    }
+  };
 
-    return () => socketRef.current.disconnect();
-  }, [token]);
+  const onOnlineUsers = ({ online, lastSeen }) => {
+    setOnlineUsers(online || []);
+    setLastSeen(lastSeen || {});
+  };
+
+  const onMessage = (msg) => {
+    // handle only system messages here; ChatWindow will handle normal user messages
+    if (msg?.type === "system") {
+      console.log("💬 System message:", msg.ciphertext);
+      toast.info(`💬 ${msg.ciphertext}`, {
+        toastId: msg._id || `system-${(msg.createdAt || Date.now())}`,
+        position: "top-right",
+        autoClose: 5000,
+      });
+    }
+  };
+
+  // reconnect handler: re-fetch users to avoid missing state
+  const onReconnect = async () => {
+    console.log("🔄 Socket reconnected, refreshing user list...");
+    try {
+      const { data: allUsers } = await api.get("/api/users");
+      setUsers(allUsers);
+    } catch (err) {
+      console.error("Failed to refresh users after reconnect", err);
+    }
+  };
+
+  // Register listeners (support several event names so server/both sides are fine)
+  socket.on("user:new", onUserNew);
+  socket.on("userAdded", onUserAdded);
+  socket.on("user:added", onUserAdded);
+
+  socket.on("user:updated", onUserUpdated);
+  socket.on("userUpdated", onUserUpdated);
+
+  socket.on("user:deleted", onUserDeleted);
+  socket.on("userDeleted", onUserDeleted);
+
+  socket.on("onlineUsers", onOnlineUsers);
+  socket.on("message", onMessage);
+
+  socket.io.on("reconnect", onReconnect);
+
+  // keep currentUserRef in sync whenever state changes
+  const unsubscribeCurrentUser = () => {};
+  // Note: easier to update ref inside any setCurrentUser call site in this file:
+  // after you call setCurrentUser(me) earlier we set the ref. But also add this effect:
+  // (we'll update the ref via a small helper below)
+
+  // Cleanup
+  return () => {
+    mounted = false;
+    socket.off("user:new", onUserNew);
+    socket.off("userAdded", onUserAdded);
+    socket.off("user:added", onUserAdded);
+    socket.off("user:updated", onUserUpdated);
+    socket.off("userUpdated", onUserUpdated);
+    socket.off("user:deleted", onUserDeleted);
+    socket.off("userDeleted", onUserDeleted);
+    socket.off("onlineUsers", onOnlineUsers);
+    socket.off("message", onMessage);
+    socket.io.off("reconnect", onReconnect);
+    socket.disconnect();
+    // ensure ref cleared
+    currentUserRef.current = null;
+    unsubscribeCurrentUser();
+  };
+}, [token]); // keep dependency on token only
+
+
 
   function handleLogout() {
     localStorage.removeItem("token");
@@ -77,37 +177,55 @@ export default function Chat({ token, onLogout }) {
         <h3 className="font-bold mb-3">Users</h3>
         <div className="space-y-2 flex-1 overflow-y-auto">
           {users.map((u) => {
-            const isOnline = onlineUsers.includes(u._id);
-            return (
-              <div
-                key={u._id}
-                className={`p-2 border rounded cursor-pointer ${
-                  selectedUser?._id === u._id ? "bg-gray-100" : ""
-                }`}
-                onClick={() => {
-                  setSelectedUser(u);
-                  setShowAdminPanel(false);
-                  setSidebarOpen(false);
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-semibold">{u.displayName || u.username}</div>
-                  <span
-                    className={`h-3 w-3 rounded-full ${
-                      isOnline ? "bg-green-500" : "bg-gray-400"
-                    }`}
-                    title={isOnline ? "Online" : formatLastSeen(lastSeen[u._id])}
-                  ></span>
-                </div>
-                <div className="text-xs text-gray-500">
-                  {isOnline ? "🟢 Online" : formatLastSeen(lastSeen[u._id])}
-                </div>
-              </div>
-            );
-          })}
+  const isOnline = onlineUsers.includes(u._id);
+  const isMe = currentUser?._id === u._id;
+
+  return (
+    <div
+      key={u._id}
+      className={`p-2 border rounded cursor-pointer transition-all ${
+        isMe
+          ? "bg-blue-50 border-blue-300" // 👤 highlight current user
+          : selectedUser?._id === u._id
+          ? "bg-gray-100"
+          : "hover:bg-gray-50"
+      }`}
+      onClick={() => {
+        if (!isMe) {
+          setSelectedUser(u);
+          setShowAdminPanel(false);
+          setSidebarOpen(false);
+        }
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="font-semibold flex items-center gap-1">
+          {u.displayName || u.username}
+          {isMe && (
+            <span className="text-xs text-blue-600 font-medium">(You)</span>
+          )}
+        </div>
+        <span
+          className={`h-3 w-3 rounded-full ${
+            isOnline ? "bg-green-500" : "bg-gray-400"
+          }`}
+          title={isOnline ? "Online" : formatLastSeen(lastSeen[u._id])}
+        ></span>
+      </div>
+      <div
+        className={`text-xs ${
+          isOnline ? "text-green-600" : "text-gray-500"
+        } mt-0.5`}
+      >
+        {isOnline ? "🟢 Online" : formatLastSeen(lastSeen[u._id])}
+      </div>
+    </div>
+  );
+})}
+
         </div>
 
-        {/* ✅ Only visible if logged-in user is admin */}
+        {/* ✅ Admin-only panel access */}
         {currentUser?.role === "admin" && (
           <div className="mt-4">
             <button
@@ -123,6 +241,7 @@ export default function Chat({ token, onLogout }) {
           </div>
         )}
 
+        {/* Logout */}
         <div className="mt-4">
           <button
             className="bg-red-500 text-white px-3 py-2 rounded w-full"
@@ -154,13 +273,22 @@ export default function Chat({ token, onLogout }) {
 
       {/* Main content */}
       <main className="flex-1 p-4 overflow-y-auto mt-12 lg:mt-0">
+        {/* Optional: show global system messages (like welcome) */}
+        {systemMessages.length > 0 && (
+          <div className="mb-4 bg-yellow-50 border border-yellow-300 rounded p-3 text-sm text-gray-700">
+            {systemMessages.map((m, i) => (
+              <div key={i}>💬 {m.ciphertext}</div>
+            ))}
+          </div>
+        )}
+
         {showAdminPanel ? (
           <AdminPanel />
         ) : selectedUser ? (
           <ChatWindow
             other={selectedUser}
             socket={socketRef.current}
-            myUserId={currentUser?._id} // ✅ pass logged-in user id
+            myUserId={currentUser?._id}
           />
         ) : (
           <div className="text-gray-500">Select a user to chat</div>
