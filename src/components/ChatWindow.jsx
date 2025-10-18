@@ -365,16 +365,18 @@ return (
     {/* Floating “New Messages” button */}
     {!isNearBottom && (
       <button
-        onClick={() => {
-          const container = messagesEndRef.current;
-          if (container) {
-            container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-          }
-        }}
-        className="absolute bottom-20 right-5 bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-blue-700 transition"
-      >
-        ⬇ New Messages
-      </button>
+  onClick={() => {
+    const container = messagesEndRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    }
+  }}
+  className="absolute bottom-20 right-5 w-9 h-9 flex items-center justify-center rounded-full bg-green-800 text-white shadow-lg hover:bg-green-950 transition transform hover:scale-105"
+  title="Scroll to latest messages"
+>
+  ⬇
+</button>
+
     )}
 
     {/* Input (sticky bottom) */}
