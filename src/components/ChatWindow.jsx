@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import api from "../services/api";
 import * as cryptoLib from "../lib/crypto";
 import { toast } from "react-toastify";
+import { generateECDHKeyPair } from "../lib/crypto";
 
 // 🔑 load private ECDH key from localStorage
 export async function loadLocalPrivateKey() {
@@ -18,7 +19,6 @@ export async function loadLocalPrivateKey() {
   );
 }
 
-
 export default function ChatWindow({ other, socket, myUserId }) {
   const [history, setHistory] = useState([]);
   const [text, setText] = useState("");
@@ -31,6 +31,22 @@ export default function ChatWindow({ other, socket, myUserId }) {
   const fileInputRef = useRef();
 
   const appendNewMessage = (m) => setHistory((prev) => [...prev, m]);
+
+  /* ---------- Initialize ECDH key pair (once per user) ---------- */
+  useEffect(() => {
+    (async () => {
+      // Generate ECDH keypair if not already present
+      const existingPub = localStorage.getItem("ecdhPublicKey");
+      if (!existingPub) {
+        await generateECDHKeyPair();
+        console.log("✅ ECDH key pair generated");
+      }
+      // Clear cached AES keys (optional — only once)
+      if (!localStorage.getItem("aesKeys")) {
+        localStorage.removeItem("aesKeys");
+      }
+    })();
+  }, []);
 
   /* ---------- Load AES key + history ---------- */
   useEffect(() => {
@@ -45,31 +61,25 @@ export default function ChatWindow({ other, socket, myUserId }) {
 
         // 🚨 Handle case: recipient has no ECDH public key yet
         if (!otherUser.ecdhPublicKey) {
-  toast.warning(
-    `⚠️ ${otherUser.displayName || otherUser.username} hasn’t logged in yet. You can message them once they’re online.`,
-    {
-      toastId: `no-key-${otherUser._id}`, // ✅ unique per user, prevents duplicates
-      position: "top-center",
-      autoClose: 5000,
-      hideProgressBar: false,
-      closeOnClick: true,
-      pauseOnHover: true,
-      draggable: true,
-      theme: "light",
-    }
-  );
-  setHasRecipientKey(false);
-  setLoading(false);
-  return;
-}
-
-        else {
+          toast.warning(
+            `⚠️ ${otherUser.displayName || otherUser.username} hasn’t logged in yet. You can message them once they’re online.`,
+            {
+              toastId: `no-key-${otherUser._id}`,
+              position: "top-center",
+              autoClose: 5000,
+              theme: "light",
+            }
+          );
+          setHasRecipientKey(false);
+          setLoading(false);
+          return;
+        } else {
           setHasRecipientKey(true);
         }
 
+        // Derive or load AES key
         let importedKey;
         const cached = cryptoLib.loadAesKeyForUser(other._id);
-
         if (cached) {
           importedKey = await cryptoLib.importAesKeyFromRawBase64(cached);
         } else {
@@ -85,7 +95,7 @@ export default function ChatWindow({ other, socket, myUserId }) {
 
         setAesKey(importedKey);
 
-        // fetch + decrypt history
+        // Fetch + decrypt history
         const { data } = await api.get(`/api/messages/history/${other._id}`);
         const decrypted = await Promise.all(
           data.map(async (m) => {
@@ -135,7 +145,6 @@ export default function ChatWindow({ other, socket, myUserId }) {
             text = await cryptoLib.decryptWithAesKey(derived, m.ciphertext);
             cryptoLib.saveAesKeyForUser(m.senderId, rawKeyBase64);
             setAesKey(derived);
-
           } else {
             text = "[Decryption Error]";
           }
@@ -182,13 +191,13 @@ export default function ChatWindow({ other, socket, myUserId }) {
       });
 
       socket.emit("sendMessage", {
-      receiverId: other._id,
-      ciphertext: c,
-      type: "text",
-      meta: {
-        senderPublicKey: await cryptoLib.getLocalPublicKey(), // ✅ ensure fresh public key
-      },
-    });
+        receiverId: other._id,
+        ciphertext: c,
+        type: "text",
+        meta: {
+          senderPublicKey: await cryptoLib.getLocalPublicKey(),
+        },
+      });
 
       setText("");
     } catch (err) {
@@ -246,14 +255,13 @@ export default function ChatWindow({ other, socket, myUserId }) {
             );
 
             socket.emit("sendMessage", {
-            receiverId: other._id,
-            ciphertext: c,
-            type: "text",
-            meta: {
-              senderPublicKey: await cryptoLib.getLocalPublicKey(), // ✅ ensure base64
-            },
-          });
-
+              receiverId: other._id,
+              ciphertext: c,
+              type: "text",
+              meta: {
+                senderPublicKey: await cryptoLib.getLocalPublicKey(),
+              },
+            });
           }
           setUploadingFiles((prev) => prev.filter((f) => f.id !== id));
         };
@@ -270,139 +278,112 @@ export default function ChatWindow({ other, socket, myUserId }) {
     }
   }
 
- /* ---------- Render ---------- */
-return (
-  <div className="flex flex-col h-full bg-white relative">
-    {/* Header */}
-    <div className="border-b p-3 font-semibold bg-gray-100 flex justify-between items-center">
-      <span>{other.displayName || other.username}</span>
-      <button
-        className="text-blue-600 hover:underline"
-        onClick={() => fileInputRef.current.click()}
-      >
-        📎
-      </button>
-      <input
-        type="file"
-        multiple
-        hidden
-        ref={fileInputRef}
-        onChange={(e) => handleFiles(e.target.files)}
-      />
-    </div>
+  /* ---------- Render ---------- */
+  return (
+    <div className="flex flex-col h-full bg-white relative">
+      {/* Header */}
+      <div className="border-b p-3 font-semibold bg-gray-100 flex justify-between items-center">
+        <span>{other.displayName || other.username}</span>
+        <button
+          className="text-blue-600 hover:underline"
+          onClick={() => fileInputRef.current.click()}
+        >
+          📎
+        </button>
+        <input
+          type="file"
+          multiple
+          hidden
+          ref={fileInputRef}
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+      </div>
 
-    {/* Messages (scrollable fixed area) */}
-    <div
-      className="flex-1 overflow-y-auto p-4 flex flex-col-reverse space-y-reverse space-y-3"
-      style={{ minHeight: 0 }}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        handleFiles(e.dataTransfer.files);
-      }}
-      ref={messagesEndRef}
-      onScroll={(e) => {
-        const el = e.target;
-        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
-        setIsNearBottom(atBottom);
-      }}
-    >
-      {loading ? (
-        <div className="text-center text-gray-500">⏳ Loading...</div>
-      ) : (
-        history
-          .slice()
-          .reverse()
-          .map((m, i) => (
-            <div
-              key={i}
-              className={`flex ${m.isMe ? "justify-end" : "justify-start"}`}
-            >
+      {/* Messages */}
+      <div
+        className="flex-1 overflow-y-auto p-4 flex flex-col-reverse space-y-reverse space-y-3"
+        style={{ minHeight: 0 }}
+        ref={messagesEndRef}
+      >
+        {loading ? (
+          <div className="text-center text-gray-500">⏳ Loading...</div>
+        ) : (
+          history
+            .slice()
+            .reverse()
+            .map((m, i) => (
               <div
-                className={`max-w-xs sm:max-w-md p-2 rounded-lg shadow text-sm ${
-                  m.isMe
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-200 text-gray-800"
-                }`}
+                key={i}
+                className={`flex ${m.isMe ? "justify-end" : "justify-start"}`}
               >
-                {m.type === "file" && m.meta?.url ? (
-                  m.meta.isImage ? (
-                    <img
-                      src={m.meta.url}
-                      alt={m.meta.name}
-                      className="rounded max-h-60 object-contain"
-                    />
+                <div
+                  className={`max-w-xs sm:max-w-md p-2 rounded-lg shadow text-sm ${
+                    m.isMe
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-200 text-gray-800"
+                  }`}
+                >
+                  {m.type === "file" && m.meta?.url ? (
+                    m.meta.isImage ? (
+                      <img
+                        src={m.meta.url}
+                        alt={m.meta.name}
+                        className="rounded max-h-60 object-contain"
+                      />
+                    ) : (
+                      <a
+                        href={m.meta.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        {m.plaintext}
+                      </a>
+                    )
                   ) : (
-                    <a
-                      href={m.meta.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline"
-                    >
-                      {m.plaintext}
-                    </a>
-                  )
-                ) : (
-                  <div>{m.plaintext}</div>
-                )}
-                <div className="text-xs opacity-70 mt-1 flex justify-between">
-                  <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
-                  {m.isMe && <span>{m.read ? "✅" : "✔️"}</span>}
+                    <div>{m.plaintext}</div>
+                  )}
+                  <div className="text-xs opacity-70 mt-1 flex justify-between">
+                    <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
+                    {m.isMe && <span>{m.read ? "✅" : "✔️"}</span>}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
-      )}
+            ))
+        )}
 
-      {/* Upload progress */}
-      {uploadingFiles.map((f) => (
-        <div key={f.id} className="text-sm text-gray-600">
-          {f.name} - {f.progress}%
+        {/* Upload progress */}
+        {uploadingFiles.map((f) => (
+          <div key={f.id} className="text-sm text-gray-600">
+            {f.name} - {f.progress}%
+          </div>
+        ))}
+      </div>
+
+      {/* Input */}
+      {!hasRecipientKey ? (
+        <div className="p-4 text-center text-yellow-700 bg-yellow-50 border-t border-yellow-300">
+          ⚠️ {other.displayName || other.username} hasn’t logged in yet.
+          <br />
+          You’ll be able to message them once they log in.
         </div>
-      ))}
+      ) : (
+        <div className="p-3 border-t flex gap-2 bg-gray-50 sticky bottom-0">
+          <input
+            className="flex-1 border rounded px-3 py-2 text-sm"
+            placeholder="Type a message..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+          />
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            onClick={send}
+          >
+            Send
+          </button>
+        </div>
+      )}
     </div>
-
-    {/* Floating “New Messages” button */}
-    {!isNearBottom && (
-      <button
-  onClick={() => {
-    const container = messagesEndRef.current;
-    if (container) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    }
-  }}
-  className="absolute bottom-20 right-5 w-9 h-9 flex items-center justify-center rounded-full bg-green-800 text-white shadow-lg hover:bg-green-950 transition transform hover:scale-105"
-  title="Scroll to latest messages"
->
-  ⬇
-</button>
-
-    )}
-
-    {/* Input (sticky bottom) */}
-    {!hasRecipientKey ? (
-      <div className="p-4 text-center text-yellow-700 bg-yellow-50 border-t border-yellow-300">
-        ⚠️ {other.displayName || other.username} hasn’t logged in yet.
-        <br />
-        You’ll be able to message them once they log in.
-      </div>
-    ) : (
-      <div className="p-3 border-t flex gap-2 bg-gray-50 sticky bottom-0">
-        <input
-          className="flex-1 border rounded px-3 py-2 text-sm"
-          placeholder="Type a message..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-        />
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          onClick={send}
-        >
-          Send
-        </button>
-      </div>
-    )}
-  </div>
-);
+  );
 }
